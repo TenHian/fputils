@@ -1,0 +1,36 @@
+From c60fa81434e9e8c7349396af0d451aac7958b103 Mon Sep 17 00:00:00 2001
+From: TenHian <tenhian.cn@gmail.com>
+Date: Thu, 18 Jul 2024 16:19:58 +0800
+Subject: [PATCH 3/3] modify Makefile to improve experience
+
+---
+ caddy/frankenphp/Makefile | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/caddy/frankenphp/Makefile b/caddy/frankenphp/Makefile
+index fdfc8a4..6476021 100644
+--- a/caddy/frankenphp/Makefile
++++ b/caddy/frankenphp/Makefile
+@@ -1,13 +1,14 @@
+-PHP_PATH=C:/msys64-new/usr/local/include/php
++PHP_PATH=C:/msys64/usr/local/include/php
+ INCLUDES=-I$(PHP_PATH) -I$(PHP_PATH)/main -I$(PHP_PATH)/TSRM -I$(PHP_PATH)/Zend -I$(PHP_PATH)/ext
+ MACROS=-D_WINDOWS -DWINDOWS=1 -DZEND_WIN32=1 -DPHP_WIN32=1 -DWIN32 -D_MBCS -D_USE_MATH_DEFINES -DNDebug -DNDEBUG -DZEND_DEBUG=0 -DZTS=1 -DFD_SETSIZE=256
+ GCCMACROS=-D_POSIX
+ CGOCFLAGS=$(INCLUDES) $(MACROS) $(GCCMACROS)
+-LDPATH=-LC:/msys64-new/usr/local/lib
++LDPATH=-LC:/msys64/usr/local/lib
+ CGOLDFLAGS=$(LDPATH) -lphp8ts -lphp8embed -lbrotlicommon -lbrotlidec -lbrotlienc
+ 
+ build:
+-	CGO_CFLAGS="$(CGOCFLAGS)" CGO_LDFLAGS="$(CGOLDFLAGS)" go build -a -x
++	CGO_CFLAGS="$(CGOCFLAGS)" CGO_LDFLAGS="$(CGOLDFLAGS)" go build -x
+ 
+ clean:
+-	rm -r *.exe
+\ No newline at end of file
++	go clean
++	go clean -cache
+-- 
+2.45.0
+

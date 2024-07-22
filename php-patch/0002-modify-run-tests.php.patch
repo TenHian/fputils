@@ -1,0 +1,399 @@
+From ef95df4bcdbaa4f0db91132ba57c0c2cb1a2b631 Mon Sep 17 00:00:00 2001
+From: TenHian <tenhian.cn@gmail.com>
+Date: Mon, 22 Jul 2024 10:37:13 +0800
+Subject: [PATCH 2/2] modify run-tests.php
+
+---
+ run-tests.php | 224 +++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 212 insertions(+), 12 deletions(-)
+
+diff --git a/run-tests.php b/run-tests.php
+index 71a8fdc80f..bbb5563457 100755
+--- a/run-tests.php
++++ b/run-tests.php
+@@ -160,7 +160,7 @@ function main(): void
+            $temp_source, $temp_target, $test_cnt, $test_dirs,
+            $test_files, $test_idx, $test_list, $test_results, $testfile,
+            $user_tests, $valgrind, $sum_results, $shuffle, $file_cache, $num_repeats,
+-           $bless, $show_progress;
++           $bless, $show_progress, $frankenphp, $frankenphp_cli;
+     // Parallel testing
+     global $workers, $workerID;
+     global $context_line_count;
+@@ -385,7 +385,7 @@ function main(): void
+         $argv = array_merge($argv, explode(' ', getenv('TEST_PHP_ARGS')));
+         $argc = count($argv);
+     }
+-
++// TODO redo the arguement parser
+     for ($i = 1; $i < $argc; $i++) {
+         $is_switch = false;
+         $switch = substr($argv[$i], 1, 1);
+@@ -659,6 +659,7 @@ function main(): void
+     if (!$php) {
+         $php = getenv('TEST_PHP_EXECUTABLE');
+     }
++    // PHP_BINARY is a predefined environment variable, its value equal to the binary which execute
+     if (!$php) {
+         $php = PHP_BINARY;
+     }
+@@ -677,6 +678,7 @@ function main(): void
+         $phpdbg = get_binary($php, 'phpdbg', 'sapi/phpdbg/phpdbg');
+     }
+ 
++    // php set here
+     putenv("TEST_PHP_EXECUTABLE=$php");
+     $environment['TEST_PHP_EXECUTABLE'] = $php;
+     putenv("TEST_PHP_EXECUTABLE_ESCAPED=" . escapeshellarg($php));
+@@ -745,7 +747,7 @@ function main(): void
+         $exts_skipped = [];
+         sort($exts_to_test);
+         $test_dirs = [];
+-        $optionals = ['Zend', 'tests', 'ext', 'sapi'];
++        $optionals = ['Zend', 'tests', 'ext'];
+ 
+         foreach ($optionals as $dir) {
+             if (is_dir($dir)) {
+@@ -753,14 +755,18 @@ function main(): void
+             }
+         }
+ 
++        // find all .phpt to be test, stored in $test_files
++        // exts to be ignored stored in $exts_skipped, cause not compiled
+         foreach ($test_dirs as $dir) {
+             find_files(TEST_PHP_SRCDIR . "/{$dir}", $dir == 'ext');
+         }
+ 
++        // $user_tests is empty
+         foreach ($user_tests as $dir) {
+             find_files($dir, $dir == 'ext');
+         }
+ 
++        // eliminating duplicates and sorting
+         $test_files = array_unique($test_files);
+         usort($test_files, "test_sort");
+ 
+@@ -833,11 +839,18 @@ function verify_config(): void
+     if (!is_executable($php)) {
+         error("invalid PHP executable specified by TEST_PHP_EXECUTABLE  = $php");
+     }
++    
++    if (basename($php) === "frankenphp.exe") {
++        global $frankenphp;
++        $frankenphp = 1;
++        global $frankenphp_cli;
++        $frankenphp_cli = "php-cli";
++    }
+ }
+ 
+ function write_information(): void
+ {
+-    global $php, $php_cgi, $phpdbg, $php_info, $user_tests, $ini_overwrites, $pass_options, $exts_to_test, $valgrind, $no_file_cache;
++    global $php, $php_cgi, $phpdbg, $php_info, $user_tests, $ini_overwrites, $pass_options, $exts_to_test, $valgrind, $no_file_cache, $frankenphp, $frankenphp_cli;
+     $php_escaped = escapeshellarg($php);
+ 
+     // Get info from php
+@@ -853,9 +866,87 @@ function write_information(): void
+     save_text($info_file, $php_info);
+     $info_params = [];
+     settings2array($ini_overwrites, $info_params);
+-    $info_params = settings2params($info_params);
+-    $php_info = shell_exec("$php_escaped $pass_options $info_params $no_file_cache \"$info_file\"");
+-    define('TESTED_PHP_VERSION', shell_exec("$php_escaped -n -r \"echo PHP_VERSION;\""));
++    if ($frankenphp) {
++        settings2ini($info_params);
++        $settings = params2settings($no_file_cache);
++        settings2ini_append($settings);
++    } else {
++        $info_params = settings2params($info_params);
++    }
++    if ($frankenphp) {
++        // frankenphp.exe use php.ini file in same directory by default.
++        // if not, kick me
++        $php_info = shell_exec("$php_escaped $frankenphp_cli $pass_options \"$info_file\"");
++    } else {
++        // TODO process $pass_options
++        $php_info = shell_exec("$php_escaped $pass_options $info_params $no_file_cache \"$info_file\"");
++    }
++    if ($frankenphp) {
++        $php_ini_path = get_ini_path();
++
++        if (!is_file($php_ini_path)) {
++            die("file \"$php_ini_path\" not exist!");
++        }
++
++        $content = file_get_contents($php_ini_path);
++        if ($content === false) {
++            die("error while get file \"$php_ini_path\" content!");
++        }
++    
++        $handle_ini = fopen($php_ini_path, "w");
++        if ($handle_ini === false) {
++            die("can not opne \"$php_ini_path\"");
++        }
++        $noerr = ftruncate($handle_ini, 0);
++        if ($noerr === false) {
++            die("can not truncate file \"$handle_ini\"!");
++        }
++        $noerr = fclose($handle_ini);
++        if ($noerr === false) {
++            die("error while close file handle \"$handle_ini\"!");
++        }
++
++        global $php;
++        $frankenphp_dir = dirname($php);
++        $php_tmp = $frankenphp_dir . "\\tmp.php";
++        if (!is_file($php_tmp)) {
++            touch($php_tmp);
++        }
++        $handle_tmpphp = fopen($php_tmp, "w");
++        if ($handle_tmpphp === false) {
++            die("can not open \"$handle_tmpphp\"");
++        }
++        $noerr = fwrite($handle_tmpphp, "<?php echo PHP_VERSION; ?>");
++        if ($noerr === false) {
++            die("can not write file \"$handle_tmpphp\"!");
++        }
++        $noerr = fclose($handle_tmpphp);
++        if ($noerr === false) {
++            die("can not close file handle \"$handle_tmpphp\"!");
++        }
++
++        define('TESTED_PHP_VERSION', shell_exec("$php_escaped $frankenphp_cli $php_tmp"));
++
++        $noerr  = unlink($php_tmp);
++        if ($noerr === false) {
++            die("can not remove file \"$php_tmp\"!");
++        }
++
++        $handle_ini = fopen($php_ini_path, "w");
++        if ($handle_ini === false) {
++            die("can not opne \"$php_ini_path\"");
++        }
++        $noerr = fwrite($handle_ini, $content);
++        if ($noerr === false) {
++            die("can not write file \"$handle_ini\"!");
++        }
++        $noerr = fclose($handle_ini);
++        if ($noerr === false) {
++            die("error while close file handle \"$handle_ini\"!");
++        }
++    } else {
++        define('TESTED_PHP_VERSION', shell_exec("$php_escaped -n -r \"echo PHP_VERSION;\""));
++    }
+ 
+     if ($php_cgi && $php != $php_cgi) {
+         $php_cgi_escaped = escapeshellarg($php_cgi);
+@@ -894,7 +985,13 @@ function write_information(): void
+         }
+         echo implode(',', $exts);
+         PHP);
+-    $extensionsNames = explode(',', shell_exec("$php_escaped $pass_options $info_params $no_file_cache \"$info_file\""));
++    // not regen php.ini cause its not be modified
++    if ($frankenphp) {
++        $extensions_noexplode = shell_exec("$php_escaped $frankenphp_cli $pass_options \"$info_file\"");
++    } else {
++        $extensions_noexplode = shell_exec("$php_escaped $pass_options $info_params $no_file_cache \"$info_file\"");
++    }
++    $extensionsNames = explode(',', $extensions_noexplode);
+     $exts_to_test = array_unique(remap_loaded_extensions_names($extensionsNames));
+     // check for extensions that need special handling and regenerate
+     $info_params_ex = [
+@@ -904,6 +1001,7 @@ function write_information(): void
+         'xdebug' => ['xdebug.mode=off'],
+     ];
+ 
++    // ini_overwrites changed by now
+     foreach ($info_params_ex as $ext => $ini_overwrites_ex) {
+         if (in_array($ext, $exts_to_test)) {
+             $ini_overwrites = array_merge($ini_overwrites, $ini_overwrites_ex);
+@@ -1052,6 +1150,7 @@ function find_files(string $dir, bool $is_ext_dir = false, bool $ignore = false)
+     $o = opendir($dir) or error("cannot open directory: $dir");
+ 
+     while (($name = readdir($o)) !== false) {
++        // find the test to be skip
+         if (is_dir("{$dir}/{$name}") && !in_array($name, ['.', '..', '.svn'])) {
+             $skip_ext = ($is_ext_dir && !in_array($name, $exts_to_test));
+             if ($skip_ext) {
+@@ -1278,6 +1377,7 @@ function run_all_tests(array $test_files, array $env, $redir_tested = null): voi
+     // Parallel testing
+     global $PHP_FAILED_TESTS, $workers, $workerID, $workerSock;
+ 
++    // all false if run-tests.php without any arguments
+     if ($file_cache !== null || $preload) {
+         /* Automatically skip opcache tests in --file-cache and --preload mode,
+          * because opcache generally expects these to run under a default configuration. */
+@@ -1302,12 +1402,14 @@ function run_all_tests(array $test_files, array $env, $redir_tested = null): voi
+     }
+ 
+     foreach ($test_files as $name) {
++        $array_fff_dbg = [];
+         if (is_array($name)) {
+             $index = "# $name[1]: $name[0]";
+ 
+             if ($redir_tested) {
+                 $name = $name[0];
+             }
++            $array_fff_dbg[] = $name;
+         } elseif ($redir_tested) {
+             $index = "# $redir_tested: $name";
+         } else {
+@@ -1871,7 +1973,7 @@ function run_test(string $php, $file, array $env): string
+         $file = $file[0];
+     }
+ 
+-    if ($DETAILED) {
++    if ($DETAILED || 1) {
+         echo "
+ =================
+ TEST $file
+@@ -2153,6 +2255,13 @@ function run_test(string $php, $file, array $env): string
+         }
+     }
+ 
++    global $frankenphp;
++    if ($frankenphp) {
++        settings2ini($ini_settings);
++    }
++    global $franken_inis;
++    $franken_inis = $ini_settings;
++        
+     $ini_settings = settings2params($ini_settings);
+ 
+     $env['TEST_PHP_EXTRA_ARGS'] = $pass_options . ' ' . $ini_settings;
+@@ -2174,8 +2283,18 @@ function run_test(string $php, $file, array $env): string
+         $junit->startTimer($shortname);
+ 
+         $startTime = microtime(true);
+-        $commandLine = "$extra $php $pass_options $extra_options -q $orig_ini_settings $no_file_cache -d display_errors=1 -d display_startup_errors=0";
++        if ($frankenphp) {
++            $append_settings = "$no_file_cache -d display_errors=1 -d display_startup_errors=0";
++            $append_settings = params2settings($append_settings);
++            settings2ini_append($append_settings);
++            $commandLine = "$extra $php php-cli $pass_options $extra_options";
++        }else {
++            $commandLine = "$extra $php $pass_options $extra_options -q $orig_ini_settings $no_file_cache -d display_errors=1 -d display_startup_errors=0";
++        }
+         $output = $skipCache->checkSkip($commandLine, $test->getSection('SKIPIF'), $test_skipif, $temp_skipif, $env);
++        if ($frankenphp) {
++            settings2ini($franken_inis);
++        }
+ 
+         $time = microtime(true) - $startTime;
+         $junit->stopTimer($shortname);
+@@ -2313,6 +2432,7 @@ function run_test(string $php, $file, array $env): string
+     }
+ 
+     // We've satisfied the preconditions - run the test!
++    // no need to modify
+     if ($test->hasSection('FILE')) {
+         show_file_block('php', $test->getSection('FILE'), 'TEST');
+         save_text($test_file, $test->getSection('FILE'), $temp_file);
+@@ -2461,7 +2581,12 @@ function run_test(string $php, $file, array $env): string
+         $env['CONTENT_LENGTH'] = '';
+ 
+         $repeat_option = $num_repeats > 1 ? "--repeat $num_repeats" : "";
+-        $cmd = "$php $pass_options $repeat_option $ini_settings -f \"$test_file\" $args$cmdRedirect";
++        global $frankenphp;
++        if ($frankenphp && !$php_cgi) {
++            $cmd = "$php php-cli $pass_options $repeat_option \"$test_file\" $args$cmdRedirect";
++        } else {
++            $cmd = "$php $pass_options $repeat_option $ini_settings -f \"$test_file\" $args$cmdRedirect";
++        }
+     }
+ 
+     $orig_cmd = $cmd;
+@@ -2525,7 +2650,13 @@ function run_test(string $php, $file, array $env): string
+         if (!$no_clean) {
+             $extra = !IS_WINDOWS ?
+                 "unset REQUEST_METHOD; unset QUERY_STRING; unset PATH_TRANSLATED; unset SCRIPT_FILENAME; unset REQUEST_METHOD;" : "";
+-            $clean_output = system_with_timeout("$extra $orig_php $pass_options -q $orig_ini_settings $no_file_cache \"$test_clean\"", $env);
++            if ($frankenphp) {
++                settings2ini($franken_inis);
++                settings2ini_append(params2settings($no_file_cache));
++                $clean_output = system_with_timeout("$extra $orig_php php-cli $pass_options \"$test_clean\"", $env);
++            } else {
++                $clean_output = system_with_timeout("$extra $orig_php $pass_options -q $orig_ini_settings $no_file_cache \"$test_clean\"", $env);
++            }
+         }
+ 
+         if (!$cfg['keep']['clean']) {
+@@ -3031,6 +3162,75 @@ function settings2params(array $ini_settings): string
+     return $settings;
+ }
+ 
++// u must check its validity
++function get_ini_path(): string {
++    global $php;
++    $frankenphp_dir = dirname($php);
++    $php_ini_path = $frankenphp_dir . "\\php.ini";
++
++    return $php_ini_path;
++}
++
++function settings2ini(array $ini_settings) {
++    $php_ini_path = get_ini_path();
++
++    if (!is_file($php_ini_path)) {
++        touch($php_ini_path);
++    }
++
++    $handle_ini = fopen($php_ini_path, "w");
++    if ($handle_ini === false) {
++        die("can not opne $php_ini_path");
++    }
++
++    $noerr = ftruncate($handle_ini, 0);
++    if ($noerr === false) {
++        die("fail to truncate php.ini to zero");
++    }
++
++    foreach ($ini_settings as $key => $value) {
++        fwrite($handle_ini, "$key=$value\n");
++    }
++    
++    fclose($handle_ini);
++}
++
++function settings2ini_append(array $ini_settings) {
++    $php_ini_path = get_ini_path();
++
++    if (!is_file($php_ini_path)) {
++        die("ini file not exist!");
++    }
++
++    $handle_ini = fopen($php_ini_path, "a");
++    if ($handle_ini === false) {
++        die("can not opne $php_ini_path");
++    }
++
++    foreach ($ini_settings as $key => $value) {
++        $noerr = fwrite($handle_ini, "$key=$value\n");
++        if ($noerr === false) {
++            die("fail to write file!");
++        }
++    }
++    
++    fclose($handle_ini);
++}
++
++function params2settings($params):array {
++    $pattern = '/(\S+)=(\S*)/';
++    preg_match_all($pattern, $params, $matches);
++    if (count($matches[1]) != count($matches[2])) {
++        die("error while process params2ini, regx length not same");
++    }
++    $ini_settings = [];
++    for ($i=0; $i < count($matches[1]); $i++) {
++        $ini_settings[$matches[1][$i]] = $matches[2][$i];
++    }
++
++    return $ini_settings;
++}
++
+ function compute_summary(): void
+ {
+     global $n_total, $test_results, $ignored_by_ext, $sum_results, $percent_results;
+-- 
+2.44.0.windows.1
+
