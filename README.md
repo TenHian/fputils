@@ -94,7 +94,6 @@ configure, nmake, nmake build-devel
 # in C:\php-sdk\phpdev\vs16\x64\php-src
 configure --disable-all --enable-zts --enable-embed --enable-cli --disable-opcache-jit --without-pcre-jit --enable-session --with-mysqlnd --enable-pdo --with-pdo-mysql
 # I wanted to write this paragraph as a bat script, but .bat is shit.
-# 让他们用二进制的frankenphp
 # Makefile path in this command is a example
 cd C:\fputils
 frankenphp.exe php-cli modify-makefile.php "C:\php-sdk\phpdev\vs16\x64\php-src\Makefile"
@@ -391,11 +390,62 @@ cp /c/php-sdk/phpdev/vs16/x64/deps/bin/nghttp2.dll ./
 # copy extension php_openssl
 mkdir ext
 cp /c/php-sdk/phpdev/vs16/x64/php-src/x64/Release_TS/php_openssl.dll ./ext/
+vim php.ini
+# >> add 2 line
+# extension_dir="C:\msys64\home\*your username*\zentao\ext"
+# extension=php_openssl.dll
+# >> 2 line end
 # run zentao pms
 ./frankenphp.exe php-server --root zentaopms/www
 ```
 
 Now you will see install page.
+
+### Run ZenDAS
+
+Rebuild php-src.
+
+```
+configure --disable-all --enable-zts --enable-embed --enable-cli --disable-opcache-jit --without-pcre-jit --enable-session --with-mysqlnd --enable-pdo --with-pdo-mysql --enable-filter --enable-mbstring --enable-zlib --with-gd --with-iconv --with-openssl --with-curl --enable-ctype --enable-zip --with-libxml --with-xml --enable-bcmath
+```
+
+Rebuild frankenphp.
+
+
+
+#### Build php_xlswriter
+
+Build zlib.
+
+into php sdk environment
+
+```
+cd C:\php-sdk\phpdev\vs16\x64\deps
+git clone https://github.com/madler/zlib.git
+cd zlib
+git checkout v1.2.11
+cmake -G "Visual Studio 16 2019" -DCMAKE_BUILD_TYPE="Release" -DCMAKE_C_FLAGS_RELEASE="/MT"
+cmake --build . --config "Release"
+```
+
+Build php_xlswriter.
+
+```
+cd C:\php-sdk\phpdev\vs16\x64\php-src\ext
+git clone https://github.com/viest/php-ext-excel-export.git
+cd php-ext-excel-export
+git checkout v1.5.5
+git submodule update --init
+phpize
+configure.bat --with-xlswriter --with-extra-libs=C:\php-sdk\phpdev\vs16\x64\deps\zlib-1.2.11\Release --with-extra-includes=C:\php-sdk\phpdev\vs16\x64\deps\zlib-1.2.11
+vim Makefile
+# add /utf-8 to 
+nmake
+```
+
+Then add php_xlswriter.dll to php.ini.
+
+
 
 # Test
 
